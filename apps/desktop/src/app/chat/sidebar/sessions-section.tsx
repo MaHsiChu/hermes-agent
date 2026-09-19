@@ -125,6 +125,7 @@ interface SidebarSessionsSectionProps {
   forceEmptyState?: boolean
   headerAction?: React.ReactNode
   footer?: React.ReactNode
+  leadingContent?: React.ReactNode
   groups?: SidebarSessionGroup[]
   tree?: SidebarWorkspaceTree[]
   // Project overview: when present, render a drill-in list of project rows
@@ -208,6 +209,7 @@ export function SidebarSessionsSection({
   forceEmptyState = false,
   headerAction,
   footer,
+  leadingContent,
   groups,
   projectOverview,
   projectOverviewPreviews,
@@ -628,7 +630,8 @@ export function SidebarSessionsSection({
       />
       {sectionOpen && (
         <SidebarGroupContent className={resolvedContentClassName}>
-          {inner}
+          {leadingContent}
+          {showEmptyState && leadingContent ? null : inner}
           {footer}
         </SidebarGroupContent>
       )}

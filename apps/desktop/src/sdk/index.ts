@@ -93,6 +93,7 @@ import {
   setResumeExhaustedSessionId,
   setSessionOwnerHint
 } from '@/store/session'
+import { $sessionDotStateById } from '@/store/session-dot-state'
 import {
   $focusedRuntimeId,
   $focusedSessionState,
@@ -638,6 +639,9 @@ async function awaitProfileActivation(
 
 export const host = {
   state: {
+    /** Visible session inventory and canonical status, shared by task boards and inline references. */
+    sessions: readonlyAtom($sessions),
+    sessionStatus: readonlyAtom($sessionDotStateById),
     /** Runtime id of the active chat session (null on a fresh draft). */
     activeSessionId: readonlyAtom<null | string>($activeSessionId),
     /** True from send until the first assistant payload on the focused chat. */
@@ -1216,6 +1220,9 @@ export const host = {
       minWidth?: string
       onClose?: () => void
       render: () => ReactNode
+      /** Also list this open workspace in Sessions. Content is presentational;
+       *  the shell owns focus and Close, sharing the original pane lifecycle. */
+      sidebarSession?: { render: () => ReactNode; searchText?: string }
       title?: string
       uncloseable?: boolean
     }
@@ -1237,6 +1244,7 @@ export const host = {
         headerVeto: options.headerVeto,
         minWidth: options.minWidth ?? '22rem',
         placement: 'main',
+        sidebarSession: options.sidebarSession,
         uncloseable: options.uncloseable
       },
       id: paneId,
@@ -1636,6 +1644,7 @@ export { McpTab } from '@/app/skills/mcp-tab'
  * `MEDIA:` delivery directives) and the same rich Markdown/media components as
  * core chat. Prefer this over raw Streamdown for transcript-style messages. */
 export { MessageTextContent } from '@/components/assistant-ui/markdown-text'
+export { TASK_REFERENCE_AREA, type TaskReferenceContribution } from '@/components/assistant-ui/task-reference'
 /** The oversized Collapse lettering an empty chat is titled with — core writes
  *  "HERMES AGENT" with it, a `chat.empty` contribution writes its own name. */
 export { Wordmark } from '@/components/chat/wordmark'

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -7,6 +7,7 @@ import { group, split } from '@/components/pane-shell/tree/model'
 import { $layoutTree, noteActiveTreeGroup } from '@/components/pane-shell/tree/store'
 import { SidebarProvider } from '@/components/ui/sidebar'
 import { registry } from '@/contrib/registry'
+import { host } from '@/sdk'
 import { $selectedStoredSessionId, $sessions } from '@/store/session'
 import { $removedSessionIds } from '@/store/session-removal'
 import { makeSessionInfo } from '@/test/session-info'
@@ -98,6 +99,29 @@ describe('ChatSidebar navigation activity', () => {
     $removedSessionIds.set(new Set())
     $layoutTree.set(null)
     noteActiveTreeGroup(null)
+  })
+
+  it('lists an opted-in workspace alongside conversations and focuses its original tab', () => {
+    let close = noop
+    act(() => {
+      close = host.openWorkspace('external-sidebar-task', {
+        render: () => null,
+        sidebarSession: { render: () => <>External task · Codex</> },
+        title: 'External task'
+      })
+    })
+    try {
+      renderSidebar('/kanban', 'extension')
+      const row = screen.getByRole('button', { name: 'External task · Codex' })
+      expect(row.closest('[data-slot="sidebar-group"]')?.textContent).toContain('Tile one')
+      fireEvent.click(row)
+      expect(row.getAttribute('aria-current')).toBe('page')
+      expectOnlySelectedSession(null)
+      act(() => close())
+      expect(screen.queryByText('External task · Codex')).toBeNull()
+    } finally {
+      close()
+    }
   })
 
   it('keeps navigation and session activity coherent with the focused pane', () => {

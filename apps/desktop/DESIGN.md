@@ -60,6 +60,11 @@ one-off at the call site.
 - **One action, one home.** A command may have keyboard, palette, and visible
   affordances, but they invoke the same action and state. Do not fork behavior
   per entry point.
+- Plugin workspaces may opt into the Sessions list through
+  `host.openWorkspace(..., { sidebarSession: { render, searchText } })`.
+  The sidebar row focuses and closes the same pane as its tab; it must not
+  create a synthetic backend session. Render only the label/status content;
+  the shell owns the row button, active indication and Close action.
 - **Projects own workspace cwd.** Use Sidebar → Projects for local folders and
   worktrees; do not reintroduce a per-session/right-sidebar folder-picker flow.
 
@@ -389,6 +394,16 @@ so glass and message-bubble transparency do not reveal scrolling text.
   for hero/brand moments; don't reintroduce decorative star/sparkle icons.
 
 ## Motion
+
+The Session Hub task board uses the shared `--ui-yellow` and `--ui-green`
+tokens for pale running and unread-completion cards. Action-required cards use
+a stronger yellow tint; completed/read cards use neutral text tokens. Text labels
+always accompany color. Motion is limited to status dots and a running underline,
+and stops under `prefers-reduced-motion`. Inline task references use the same state.
+
+`chat.task-reference` contributions own an explicit `#task/<namespace>/<value>`
+fragment namespace. They render live task cards in chat; missing plugins leave the
+authored label readable and inert. Only a user click may open a task.
 
 - Visible windows keep animating when another app takes focus. Hidden/minimized
   windows and inactive panes may pause; background polling stays focus-gated.

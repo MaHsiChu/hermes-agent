@@ -45,6 +45,7 @@ import { ArtifactCard } from './artifact-card'
 import { SessionRefLink } from './directive-text'
 import { detectEmbed, extractAlert, MarkdownAlert, RichCodeBlock, UrlEmbed } from './embeds'
 import { ResizableMarkdownTable, ResizableMarkdownTh } from './markdown-table'
+import { TaskReference } from './task-reference'
 import { paragraphPlainText, TranscriptDirectiveLeaf, useResolvedParagraph } from './transcript-directive'
 
 const onboardingEnabled = isOnboardingEnabled()
@@ -261,6 +262,10 @@ function childrenToText(children: unknown): string {
 }
 
 function MarkdownLink({ children, className, href, ...props }: ComponentProps<'a'>) {
+  if (href?.startsWith('#task/')) {
+    return <TaskReference href={href}>{children}</TaskReference>
+  }
+
   const mediaPath = mediaPathFromMarkdownHref(href)
 
   if (mediaPath) {

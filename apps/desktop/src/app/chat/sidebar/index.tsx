@@ -185,6 +185,7 @@ import { buildSessionByAnyId, resolvePinnedSessions } from './session-index'
 import { SidebarSessionsSection, VIRTUALIZE_THRESHOLD } from './sessions-section'
 import { CONTEXT_SPLIT_KIT, SplitSubmenu } from './split-submenu'
 import { useEnteredProjectSessions } from './use-entered-project-sessions'
+import { useWorkspaceSessions, WorkspaceSessionRows } from './workspace-sessions'
 
 // Non-session groups (messaging platforms) stay compact: show a few rows up
 // front, reveal more in larger steps on demand. Keeps a busy platform from
@@ -469,6 +470,10 @@ export function ChatSidebar({
   const [messagingVisible, setMessagingVisible] = useState<Record<string, number>>({})
   const searchInputRef = useRef<HTMLInputElement>(null)
   const trimmedQuery = searchQuery.trim()
+  const workspaceSessions = useWorkspaceSessions(trimmedQuery)
+
+  const workspaceSessionRows =
+    !showArchived && workspaceSessions.length ? <WorkspaceSessionRows entries={workspaceSessions} /> : undefined
 
   // Hotkey (session.focusSearch) → focus the field once it's mounted.
   useEffect(() => {
@@ -1658,6 +1663,7 @@ export function ChatSidebar({
                   )
                 }
                 label={s.results}
+                leadingContent={workspaceSessionRows}
                 onArchiveSession={onArchiveSession}
                 onBranchSession={onBranchSession}
                 onDeleteSession={onDeleteSession}
@@ -1858,6 +1864,7 @@ export function ChatSidebar({
                     ) : undefined
                   ) : undefined
                 }
+                leadingContent={!inProject ? workspaceSessionRows : undefined}
                 liveSessions={inProject ? enteredProjectOverlaySessions : undefined}
                 manualOrderIds={agentOrderManual ? agentOrderIds : sortOrderIds}
                 onArchiveSession={onArchiveSession}
