@@ -1,0 +1,17 @@
+# Machine-specific configuration, identities, transcripts, tokens and logs.
+settings.json
+data/
+__pycache__/
+*.pyc
+plugin/extension-root.txt
+build/
+node_modules/
+playground/
+*.log
+*-results.json
+*-acceptance.json
+*-result.json
+*-preview.png
+*-live.png
+*-ui.png
+board-runtime-style*.json

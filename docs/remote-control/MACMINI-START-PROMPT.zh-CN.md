@@ -5,7 +5,7 @@
 1. 在 Mac mini 上拉取 `https://github.com/MaHsiChu/hermes-agent.git`，或使用已有、用户指定的该仓库 checkout。
 2. 确认拉取后的仓库包含 `docs/remote-control/`。文档已纳入本次 Git 交接提交；若使用旧版 checkout，可更新到包含文档的版本，或单独复制文档包。
 3. 在 Mac mini 的开发 Agent 中打开该仓库，粘贴下面的完整提示词。不要复制 Windows 的凭据、运行时目录、真实会话数据库、`.venv` 或 `node_modules`。
-4. Session Hub 是 Windows 外层独立扩展，未包含在文档包及已确认的内层仓库中。缺少它时先推进原生 Hermes 远程闭环。
+4. Session Hub 已纳入仓库 `extensions/session-hub/`。同时阅读它的 `CHECKOUT.zh-CN.md`，配置本机路径并验证平台能力；真实运行数据和 App 绑定不会随 Git 迁移。
 
 ## 可复制提示词
 
@@ -16,9 +16,9 @@
 
 产品目标：同一个自有产品账号在 PC 和手机登录，手机可以查看已绑定电脑授权范围内的全部 Agent session，并向原 session 继续下达指令，工作仍在原电脑、原目录和原上下文中执行。Mac mini 承担账号、设备注册、历史副本和消息中转，PC 主动向外连接。优先中文手机 PWA、中国大陆访问体验，后续覆盖目前 Session Hub 聚合的 Codex App / Claude Code 会话。
 
-已知仓库是 https://github.com/MaHsiChu/hermes-agent.git。需求分析时 Windows 的内层仓库 HEAD 为 d177b119e9c56c9ddc0b7379ffce52341ec06584，；当时的桌面改动现已归入提交 6ebd7ef。外层 extensions/session-hub 不在这个 Git 仓库里，文档包也不含该扩展。先核查你实际拿到的源码和版本，不强制 reset、不覆盖已有修改，也不假设 clone 已包含 Windows 定制。缺失扩展时登记缺口、保留适配协议，继续完成 Hermes 原生主链路。
+已知仓库是 https://github.com/MaHsiChu/hermes-agent.git。需求分析时 Windows 的内层仓库 HEAD 为 d177b119e9c56c9ddc0b7379ffce52341ec06584；当时的桌面改动现已归入提交 6ebd7ef。Session Hub 现已纳入 extensions/session-hub，集成研究在 docs/session-hub。先读扩展 CHECKOUT.zh-CN.md，核查源码及版本，不强制 reset、不覆盖已有修改。个人配置、会话、App 绑定未上传，按本机环境重新配置和验收；不能再将扩展源码本身当作等待提供的依赖。
 
-第一轮先完成 M0，再连续推进 M1：核对环境与真实 Hermes 接口，选择成熟可自托管的账号实现，做真实账号登录、设备绑定、PC Bridge 出站连接、手机会话列表和历史、向原 session 发送、实时结果和双端同步。随后推进 M2 的持久化回执、断线补读、离线历史、设备撤销、双端并发、审批/停止和附件。不要做静态页面或 mock 聊天后就结束。M3 的 Codex/Claude 必须在取得源码及真实 App 环境后分别验收，缺少该阶段不得宣称全部产品目标完成。
+第一轮先完成 M0，再连续推进 M1：核对环境与真实 Hermes 接口，选择成熟可自托管的账号实现，做真实账号登录、设备绑定、PC Bridge 出站连接、手机会话列表和历史、向原 session 发送、实时结果和双端同步。随后推进 M2 的持久化回执、断线补读、离线历史、设备撤销、双端并发、审批/停止和附件。不要做静态页面或 mock 聊天后就结束。M3 的 Codex/Claude 必须基于仓库内源码，在真实 App 环境中分别验收，缺少该阶段不得宣称全部产品目标完成。
 
 默认使用 React/TypeScript PWA、Python Bridge、FastAPI 业务服务、PostgreSQL 和 Caddy；若源码已有更合适的基础，可以记录 ADR 后采用，不要因普通实现选型反复等待确认。产品账号与模型供应商登录分离。默认内测邀请注册、可读历史副本、PC 离线保存草稿，待上线后由用户发送。正式品牌与域名缺失不阻塞本地开发。
 

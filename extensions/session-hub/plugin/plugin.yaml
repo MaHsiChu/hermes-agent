@@ -1,0 +1,5 @@
+name: session-hub
+version: 0.4.4
+description: Local Codex and Claude session history, handoff queue and completion inbox
+provides_tools: []
+provides_hooks: []

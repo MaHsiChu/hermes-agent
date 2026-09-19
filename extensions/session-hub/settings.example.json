@@ -1,0 +1,11 @@
+{
+  "port": 47831,
+  "codex_home": "/absolute/path/to/codex-home",
+  "claude_home": "/absolute/path/to/claude-home",
+  "claude_desktop_home": "/absolute/path/to/claude-desktop-code-sessions",
+  "codex_binary": "codex",
+  "claude_binary": "claude",
+  "default_workspace": "/absolute/path/to/workspace",
+  "poll_seconds": 5,
+  "job_timeout_seconds": 1800
+}

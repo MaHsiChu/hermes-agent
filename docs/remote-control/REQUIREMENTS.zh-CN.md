@@ -24,8 +24,8 @@
 - 本地分支：`main`；HEAD：`d177b119e9c56c9ddc0b7379ffce52341ec06584`。
 - 本地桌面 package 版本：`0.17.6`；Python 项目版本：`0.21.3`。新环境以实际文件为准。
 - 分析时存在未提交的桌面侧改动，涉及侧栏工作区会话、任务引用等；它们现已归入提交 `6ebd7ef`。Mac 开发以实际拉取的 HEAD 为准，禁止覆盖新环境已有改动。
-- 外层 `extensions/session-hub/` 和 `reports/codex-integration/` 不在上述内层 Git 仓库中。仅 clone origin 不会获得它们。
-- 本交接文档现纳入该 Git 仓库的 `docs/remote-control/`，随本次交接提交发布；拉取包含本文档的版本后无需单独传 ZIP。此前生成的文档 ZIP 是创建时快照，只含需求和提示词，不包含项目源码或 Session Hub。
+- Session Hub 现已纳入仓库 `extensions/session-hub/`，相关集成研究见 `docs/session-hub/`。原 Windows 外层副本及其运行数据仍留在本地；clone 可获得源码、测试和文档，但不会获得个人配置、凭据、会话和截图。安装见扩展的 `CHECKOUT.zh-CN.md`。
+- 本交接文档现纳入该 Git 仓库的 `docs/remote-control/`，随本次交接提交发布；拉取包含本文档的版本后无需单独传 ZIP。此前生成的文档 ZIP 是创建时快照，只含需求和提示词，不包含项目源码或 Session Hub；以当前 Git 文档为准。
 
 Mac mini 首次启动开发必须核对 origin、HEAD、工作区状态、AGENTS.md 和实际接口。可比较上述提交，但不要为对齐提交号强制 reset、覆盖用户文件或替换已有配置。记录版本差异，优先延续可运行且用户指定的 checkout。
 
@@ -39,7 +39,7 @@ Mac mini 首次启动开发必须核对 origin、HEAD、工作区状态、AGENTS
 | `apps/shared/src/gateway-contract.openrpc.json` | `session.resume`、`prompt.submit`、`session.steer`、`session.interrupt`、事件回放及审批协议 | 版本契约、并发语义、传输所有权 |
 | `tui_gateway/transport.py` | 事件分发基础 | 多客户端同时订阅、慢客户端隔离 |
 | `tui_gateway/event_replay.py` | 带序号的有限内存回放 | 重启及缓冲淘汰后的持久化恢复 |
-| 外层 `extensions/session-hub/` | Codex App / Claude Code 原会话历史及续聊适配 | 源码另行提供；平台及 App 版本重新验收 |
+| `extensions/session-hub/` | Codex App / Claude Code 原会话历史及续聊适配 | 源码已随仓库提供；配置、平台及 App 版本重新验收 |
 
 本机 Session Hub 0.4.4 文档记录了原会话续聊及历史功能，同时明确审批、停止和原生 Review 尚未接入。该记录不是 Mac 环境的通过证据；不可将内部 App 接口当作稳定公共 API。Claude 普通 Chat / Cowork 不在已知接入范围。
 
@@ -219,10 +219,10 @@ flowchart TB
 | M0 基线与决策 | 环境报告、版本记录、接口探测、身份方案 ADR、实施清单 | 找到真实后端连接方式，说明缺失源码及环境；不只停留在调研 |
 | M1 Hermes 原生闭环 | 独立账号、设备绑定、出站 Bridge、手机列表/历史/发送/流式结果、基本部署 | 两个真实客户端连接同一后端；手机驱动原 session，PC 看到同一轮；账号隔离测试通过 |
 | M2 可靠性与可用性 | 全历史分页同步、离线阅读、持久化回执、双端并发、撤销、Hermes 审批/停止、附件 | 故障矩阵通过；macOS 服务重启恢复；有 Windows 真机执行端证据或明确待验项 |
-| M3 当前全部会话范围 | 接入取得源码的 Session Hub，统一 Codex / Claude 展示及能力 | 每种引擎分别证明历史和原会话续聊；不支持的审批/停止明确禁用 |
+| M3 当前全部会话范围 | 接入仓库内 Session Hub，统一 Codex / Claude 展示及能力 | 每种引擎分别证明历史和原会话续聊；不支持的审批/停止明确禁用 |
 | M4 产品交付 | 独立品牌配置、安装/更新、网络验收、备份恢复、运维手册 | 可复现部署与目标设备验收；第三方许可清单 |
 
-第一轮立即实施 M0→M1，M1 后继续推进 M2；Session Hub 缺失不阻塞前两阶段，但 M3 缺失时不能声称完成“全部会话”产品目标。公网或 Windows 环境暂不可用时继续可独立完成的开发，并列出剩余验收。
+第一轮立即实施 M0→M1，M1 后继续推进 M2；Session Hub 已有源码；第三方 App 环境缺失不阻塞前两阶段，但 M3 缺失时不能声称完成“全部会话”产品目标。公网或 Windows 环境暂不可用时继续可独立完成的开发，并列出剩余验收。
 
 ## 10. 验收用例
 
@@ -261,7 +261,7 @@ flowchart TB
 
 默认手机 PWA、中文界面、内测邀请账号、自有服务器保存可读副本、第一版离线只保存草稿。上述为建议默认值，不等于用户逐项作出最终产品选择；实现需保持可配置，并在状态文档记录。
 
-需要用户或环境补充：正式名称/域名、Mac 网络位置与上行、允许使用的身份服务与邮件配置、目标 Windows PC 连接方式、Session Hub 源码获取方式、可用于隔离验收的模型配置、数据保留策略。先从本机实际环境读取非敏感信息；缺失时继续本地开发，不要求用户在聊天中粘贴密钥。
+需要用户或环境补充：正式名称/域名、Mac 网络位置与上行、允许使用的身份服务与邮件配置、目标 Windows PC 连接方式、可用于隔离验收的模型配置、数据保留策略。先从本机实际环境读取非敏感信息；缺失时继续本地开发，不要求用户在聊天中粘贴密钥。
 
 ## 13. 参考资料与证据边界
 
