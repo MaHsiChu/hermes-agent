@@ -23,12 +23,19 @@ class ClientSurface(WireEnum):
     voice_live = "voice-live"
 
 
+class PromptImageInput(Params):
+    filename: str
+    content_base64: str
+
+
 class PromptSubmitParams(SessionParams):
     """``text`` is normally a string; the relay / hosted paths may hand a structured (parts list)
     payload, and the busy path renders it. Truncation (rewind / edit / regenerate) needs explicit
     consent: ``confirm_truncate`` plus one durable target (``truncate_before_row_id`` preferred,
     ``truncate_before_message_id``, or the legacy ``truncate_before_user_ordinal``)."""
 
+    image_inputs: list[PromptImageInput] = Field(default_factory=list)  # omission uses legacy staging; explicit [] isolates
+    reject_if_busy: bool = False  # atomically refuse rather than queue/steer
     text: JsonValue = ""
     display_kind: str | None = None  # only "hidden" is honoured; anything else renders as a user row
     interrupted: bool | None = None  # client-side barge-in: the turn's model message carries the note

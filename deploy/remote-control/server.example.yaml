@@ -1,0 +1,16 @@
+public_url: https://remote.example.invalid
+host: 0.0.0.0
+port: 8787
+development: false
+database_secret:
+  env: REMOTE_DATABASE_URL
+oidc:
+  issuer: https://identity.example.invalid/realms/hermes-remote
+  client_id: hermes-remote
+  client_secret:
+    env: REMOTE_OIDC_CLIENT_SECRET
+session_seconds: 43200
+pairing_seconds: 600
+command_seconds: 30
+attachment_limit: 8388608
+static_dir: /app/mobile

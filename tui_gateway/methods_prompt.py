@@ -487,37 +487,41 @@ def _persist_session_row_for_submit(rid, session, text=None, display_kind=None):
     return error
 
 
-def _run_after_agent_ready(rid, sid, session, text, display_kind, hosted_terminal_callback, turn_author=None):
+def _run_after_agent_ready(rid, sid, session, text, display_kind, hosted_terminal_callback, turn_author=None, image_paths=None):
     """Turn thread body: patient wait for a deferred build (a slow build must not eat the
     accepted in-flight message), then run."""
-    # The wait delivers the prompt when the still-running build completes, honors a cancel promptly, notices
-    # the user once past the slow threshold, and only errors when the build itself fails or the bounded cap
-    # expires. See #63078.
-    err = _wait_agent_for_prompt(session, rid, sid)
-    if err:
-        # Terminal frame + retained snapshot (not a bare "error" event): the snapshot is
-        # the only way resume shows this to a disconnected client.
-        _emit_terminal_turn_error(
-            sid, session, (err.get("error") or {}).get("message", "agent initialization failed"),
-            error_surface={"layer": "runtime", "code": "agent_init_failed", "retryable": True})
-        with session["history_lock"]:
-            session["running"] = False
-            session["last_active"] = time.time()
-        _emit("session.info", sid, _session_info(session.get("agent"), session))
-        return
-    with session["history_lock"]:
-        if session.get("_turn_cancel_requested") or not session.get("running"):
-            session["running"] = False
-            _clear_inflight_turn(session)
-            # Without this emit the turn vanishes silently after {"status": "streaming"}.
-            _emit("error", sid, {"message": (
-                "Turn cancelled before the agent was ready"
-                if session.get("_turn_cancel_requested")
-                else "Session no longer running before the agent was ready")})
+    try:
+        # The wait delivers the prompt when the still-running build completes, honors a cancel promptly, notices
+        # the user once past the slow threshold, and only errors when the build itself fails or the bounded cap
+        # expires. See #63078.
+        err = _wait_agent_for_prompt(session, rid, sid)
+        if err:
+            # Terminal frame + retained snapshot (not a bare "error" event): the snapshot is
+            # the only way resume shows this to a disconnected client.
+            _emit_terminal_turn_error(
+                sid, session, (err.get("error") or {}).get("message", "agent initialization failed"),
+                error_surface={"layer": "runtime", "code": "agent_init_failed", "retryable": True})
+            with session["history_lock"]:
+                session["running"] = False
+                session["last_active"] = time.time()
+            _emit("session.info", sid, _session_info(session.get("agent"), session))
             return
-    _run_prompt_submit(
-        rid, sid, session, text, display_kind=display_kind,
-        terminal_callback=hosted_terminal_callback, turn_author=turn_author)
+        with session["history_lock"]:
+            if session.get("_turn_cancel_requested") or not session.get("running"):
+                session["running"] = False
+                _clear_inflight_turn(session)
+                # Without this emit the turn vanishes silently after {"status": "streaming"}.
+                _emit("error", sid, {"message": (
+                    "Turn cancelled before the agent was ready"
+                    if session.get("_turn_cancel_requested")
+                    else "Session no longer running before the agent was ready")})
+                return
+        _run_prompt_submit(
+            rid, sid, session, text, display_kind=display_kind,
+            terminal_callback=hosted_terminal_callback, turn_author=turn_author,
+            **({"image_paths": image_paths} if image_paths is not None else {}))
+    finally:
+        _discard_request_images(session, image_paths)
 
 
 _TRUNCATION_PARAMS = (
@@ -532,6 +536,8 @@ def _lock_in_submit_turn(
     with _session_turn_admission(session) as admitted:
         if not admitted:
             return _err(rid, 5035, "backend is retiring; reconnect to continue"), fields
+        if session.get("running"):
+            return _err(rid, 4091, "Session is busy; choose queue or steer explicitly"), fields
         # A watch session's run lives in the PARENT turn (own running flag False); typing
         # mid-run would build a second agent racing the child on the same stored session.
         if session.get("lazy") and _child_run_active(str(session.get("session_key") or "")):
@@ -561,6 +567,27 @@ _CLIENT_SURFACES = frozenset({"hud", "voice-live"})
 
 @method("prompt.submit")
 def _(rid, params: dict) -> dict:
+    if "reject_if_busy" in params and not isinstance(params["reject_if_busy"], bool):
+        return _err(rid, 4000, "reject_if_busy must be boolean")
+    if "image_inputs" not in params:
+        return _submit_prompt_impl(rid, params)
+    session, err = _sess_nowait(params, rid)
+    if err:
+        return err
+    images, err = _prepare_prompt_images(rid, session, params)
+    if err:
+        return err
+    adopted = False
+    try:
+        response = _submit_prompt_impl(rid, params, image_paths=images, session=session)
+        adopted = response.get("result", {}).get("status") in {"queued", "streaming"}
+        return response
+    finally:
+        if not adopted:
+            _discard_request_images(session, images)
+
+
+def _submit_prompt_impl(rid, params: dict, image_paths=None, session=None) -> dict:
     from hermes_cli.input_sanitize import sanitize_user_prompt_text
     sid = params.get("session_id", "")
     raw_text = params.get("text", "")
@@ -574,9 +601,10 @@ def _(rid, params: dict) -> dict:
         # Client-side barge-in: latch so this turn's model message carries the note.
         from tools.tts_streaming import mark_speech_interrupted
         mark_speech_interrupted()
-    session, err = _sess_nowait(params, rid)
-    if err:
-        return err
+    if session is None:
+        session, err = _sess_nowait(params, rid)
+        if err:
+            return err
     from tools.bot_relay import DeliveryAuthor
 
     # Only the relay handler can build a DeliveryAuthor. A dict here is a client claiming a sender.
@@ -625,31 +653,38 @@ def _(rid, params: dict) -> dict:
     # history_lock is released (a non-interruptible tool may hold it); if the old turn
     # finished between the two acquisitions, retry the claim rather than strand this
     # prompt in a queue whose drain already ran.
-    while True:
-        with session["history_lock"]:
-            if not session.get("running"):
-                break
-            if internal_hosted_submit:
-                return _err(rid, 4091, "hosted room member session is busy")
-            busy_transport = t or session.get("transport")
-        busy_response = _handle_busy_submit(
-            rid, sid, session, text, busy_transport, queued=bool(params.get("queued")), turn_author=turn_author)
-        if busy_response is not None:
-            return busy_response
     raw_rebind_ids = params.get("rebind_survivor_row_ids")
     requested_rebind_ids = (
         {r for r in raw_rebind_ids if isinstance(r, int) and not isinstance(r, bool)}
         if isinstance(raw_rebind_ids, list) else None)
-    err, survivor_fields = _lock_in_submit_turn(
-        rid, sid, session, text, params, has_truncation, requested_rebind_ids, hosted_task, display_kind)
-    if err is not None:
-        return err
+    while True:
+        with session["history_lock"]:
+            busy = bool(session.get("running"))
+            if busy and (internal_hosted_submit or params.get("reject_if_busy") is True):
+                return _err(rid, 4091, "Session is busy; choose queue or steer explicitly")
+            busy_transport = t or session.get("transport")
+        if busy:
+            busy_response = _handle_busy_submit(
+                rid, sid, session, text, busy_transport, queued=bool(params.get("queued")) or image_paths is not None,
+                turn_author=turn_author, image_paths=image_paths)
+            if busy_response is not None:
+                return busy_response
+            continue
+        err, survivor_fields = _lock_in_submit_turn(
+            rid, sid, session, text, params, has_truncation, requested_rebind_ids, hosted_task, display_kind)
+        if err is not None:
+            if (err.get("error", {}).get("code") == 4091 and not internal_hosted_submit
+                    and params.get("reject_if_busy") is not True):
+                continue
+            return err
+        break
     if turn_isolation:
         if turn_author:
             logger.debug("isolated compute turns carry no author yet; the turn from %s runs unattributed",
                          turn_author.get("id"))
         isolated_response = _submit_prompt_to_compute_host(
-            rid, sid, session, text, display_kind=display_kind)
+            rid, sid, session, text, display_kind=display_kind,
+            **({"image_paths": image_paths} if image_paths is not None else {}))
         if not isolated_response.get("error"):
             # The truncation already happened inline above (memory + DB).
             isolated_response["result"].update(survivor_fields)
@@ -672,7 +707,8 @@ def _(rid, params: dict) -> dict:
         _start_agent_build(sid, session)
     run_thread = threading.Thread(
         target=lambda: _run_after_agent_ready(
-            rid, sid, session, text, display_kind, hosted_terminal_callback, turn_author),
+            rid, sid, session, text, display_kind, hosted_terminal_callback, turn_author,
+            **({"image_paths": image_paths} if image_paths is not None else {})),
         daemon=True)
     # Handle lets session.interrupt tell a live turn from a stuck `running` flag.
     session["_run_thread"] = run_thread

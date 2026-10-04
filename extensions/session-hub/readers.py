@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import time
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -73,40 +74,86 @@ class SessionReaders:
         self.claude = Path(settings['claude_home'])
         self.desktop = Path(settings['claude_desktop_home'])
         self._cache = []
+        self._errors = []
+        self._snapshots = {}
         self._at = 0
 
-    def sessions(self, engine='', query='', limit=50, refresh=False):
-        if refresh or time.monotonic()-self._at > 10:
-            items = []
-            errors = []
-            for source in (self.codex_sessions, self.claude_sessions):
-                try:
-                    items.extend(source())
-                except (OSError, sqlite3.Error, ValueError) as exc:
-                    errors.append(f'{source.__name__}: {exc}')
-            self._cache = sorted(items, key=lambda s:s['updated_at'], reverse=True)
-            self._errors = errors
-            self._at = time.monotonic()
-        matching = [s for s in self._cache if (not engine or s['engine']==engine) and (not query or query.lower() in (s['title']+' '+s['cwd']+' '+s['session_id']).lower())]
-        return {'sessions': matching[:max(1,min(limit,200))], 'total':len(matching), 'errors':self._errors}
+    def sessions(self, engine='', query='', limit=50, refresh=False, *, offset=0,
+                 include_archived=False, snapshot_id=''):
+        if engine not in ('', 'codex', 'claude') or not isinstance(query, str):
+            raise ValueError('Invalid catalog engine or query')
+        if type(include_archived) is not bool or type(offset) is not int or offset < 0:
+            raise ValueError('include_archived must be boolean and offset a nonnegative integer')
+        if type(limit) is not int or not isinstance(snapshot_id, str):
+            raise ValueError('Invalid catalog limit or snapshot_id')
+        scope = (engine, query.casefold(), include_archived)
+        now = time.monotonic()
+        self._snapshots = {key: value for key, value in self._snapshots.items()
+                           if now - value['created'] < 180}
+        if snapshot_id:
+            snapshot = self._snapshots.get(snapshot_id)
+            if snapshot is None or snapshot['scope'] != scope:
+                raise ValueError('Catalog snapshot expired or belongs to different filters; restart at offset 0')
+            return self._catalog_page(snapshot_id, snapshot, offset, limit)
+        self._refresh_cache(refresh)
+        matching = [s for s in self._cache if (not engine or s['engine']==engine)
+                    and (include_archived or not s.get('archived'))
+                    and (not query or query.casefold() in (s['title']+' '+s['cwd']+' '+s['session_id']).casefold())]
+        # A polling board must not move entries between an export's offset pages.
+        # Bounded snapshots expire explicitly, so the caller can restart reconciliation.
+        while len(self._snapshots) >= 32:
+            self._snapshots.pop(next(iter(self._snapshots)))
+        snapshot_id = uuid.uuid4().hex
+        snapshot = {'created': now, 'scope': scope, 'rows': matching, 'errors': list(self._errors)}
+        self._snapshots[snapshot_id] = snapshot
+        return self._catalog_page(snapshot_id, snapshot, offset, limit)
+
+    def _refresh_cache(self, force=False):
+        if not force and time.monotonic()-self._at <= 10:
+            return
+        items, errors = [], []
+        for source in (self.codex_sessions, self.claude_sessions):
+            try:
+                items.extend(source())
+            except (OSError, sqlite3.Error, ValueError) as exc:
+                errors.append(f'{source.__name__}: {exc}')
+        self._cache = sorted(items, key=lambda s:(s['updated_at'], s['engine'], s['session_id']), reverse=True)
+        self._errors = errors
+        self._at = time.monotonic()
+
+    @staticmethod
+    def _catalog_page(snapshot_id, snapshot, offset, limit):
+        limit = max(1, min(limit, 200))
+        rows = snapshot['rows'][offset:offset+limit]
+        total = len(snapshot['rows'])
+        next_offset = offset + len(rows)
+        return {'sessions': rows, 'total': total, 'errors': snapshot['errors'],
+                'pagination': {'offset': offset, 'limit': limit, 'returned': len(rows),
+                               'total': total, 'snapshot_id': snapshot_id,
+                               'next_offset': next_offset if next_offset < total else None,
+                               'complete': not snapshot['errors']}}
 
     def codex_sessions(self, exact_id=None):
         with readonly(self.codex/'state_5.sqlite') as db:
             query='SELECT id,rollout_path,cwd,title,name,updated_at,archived,source,history_mode FROM threads WHERE '
-            rows = db.execute(query+('id=?' if exact_id else 'archived=0 ORDER BY updated_at DESC'),(exact_id,) if exact_id else ()).fetchall()
+            rows = db.execute(query+('id=?' if exact_id else '1=1 ORDER BY updated_at DESC'),(exact_id,) if exact_id else ()).fetchall()
         result = []
         for r in rows:
             path=canonical_native_path(r['rollout_path'])
             # Never follow a foreign DB path outside its own store.
             if not path.is_relative_to(canonical_native_path(self.codex)):
                 continue
-            result.append({'engine':'codex','session_id':r['id'],'title':r['name'] or r['title'] or r['id'],'cwd':r['cwd'],'updated_at':r['updated_at'],'path':str(path),'origin':r['source'],'app_session_id':r['id'],'history_mode':r['history_mode']})
+            result.append({'engine':'codex','session_id':r['id'],'title':r['name'] or r['title'] or r['id'],'cwd':r['cwd'],'updated_at':r['updated_at'],'path':str(path),'origin':r['source'],'app_session_id':r['id'],'history_mode':r['history_mode'],'archived':bool(r['archived'])})
         return result
 
     def claude_sessions(self):
         desktop={}
         for path in self.desktop.rglob('local_*.json') if self.desktop.exists() else []:
-            obj=read_json(path)
+            # Missing optional metadata is fine. Unreadable existing metadata
+            # makes filtered/archive coverage uncertain and must fail the scan.
+            obj=json.loads(path.read_text(encoding='utf-8-sig'))
+            if not isinstance(obj, dict):
+                raise ValueError(f'Invalid Claude metadata object: {path}')
             if obj.get('cliSessionId'):
                 desktop[obj['cliSessionId']]=obj
         result=[]
@@ -129,16 +176,16 @@ class SessionReaders:
                     if not title and row.get('type')=='user':
                         title=text_blocks(row.get('message',{}).get('content',''))[:180]
                     if cwd and title: break
-            result.append({'engine':'claude','session_id':sid,'title':title or sid,'cwd':cwd,'updated_at':path.stat().st_mtime,'path':str(path),'origin':'claude-desktop' if meta else 'claude-code','app_session_id':meta.get('sessionId')})
+            result.append({'engine':'claude','session_id':sid,'title':title or sid,'cwd':cwd,'updated_at':path.stat().st_mtime,'path':str(path),'origin':'claude-desktop' if meta else 'claude-code','app_session_id':meta.get('sessionId'),'archived':bool(meta.get('archived',False))})
         return result
 
     def resolve(self, engine, session_id, refresh_missing=True):
         if engine not in ('codex','claude'):
             raise ValueError('engine must be codex or claude')
-        self.sessions()
+        self._refresh_cache()
         found=next((s for s in self._cache if s['engine']==engine and session_id in (s['session_id'],s.get('app_session_id'))),None)
         if not found and refresh_missing:
-            self.sessions(refresh=True)
+            self._refresh_cache(force=True)
             found=next((s for s in self._cache if s['engine']==engine and session_id in (s['session_id'],s.get('app_session_id'))),None)
         if not found and engine=='codex' and refresh_missing:
             exact=self.codex_sessions(session_id)

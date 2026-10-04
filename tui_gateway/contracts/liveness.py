@@ -19,6 +19,12 @@ method("ping", params=PingParams, result=PingResult,
 
 
 class GatewayCapabilitiesResult(Result):
+    request_owned_prompt_images: bool
+    prompt_reject_if_busy: bool
+    prompt_image_uploads: bool
+    prompt_image_max_count: int
+    prompt_image_max_total_bytes: int
+    prompt_image_max_request_bytes: int
     per_session_exclusive_submit: bool
 
 

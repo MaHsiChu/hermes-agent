@@ -267,3 +267,37 @@ def test_host_builds_the_session_agent_with_the_frame_login(monkeypatch):
     assert captured["auth_user_id"] == "basic:alice"
     assert session["auth_user_id"] == "basic:alice"
     assert server._session_auth_user_id(session) == "basic:alice"
+
+
+def test_owned_compute_frames_reuse_child_without_borrowing_staging(turn_env, monkeypatch, tmp_path):
+    """The real child turn consumes only each frame's immutable media, including []."""
+    from PIL import Image
+    out = io.StringIO()
+    host = ComputeHost(stdout=out, heartbeat_secs=0)
+    sid = 'owned-compute'
+    session = _session(_agent(['done']))
+    session['profile_home'] = str(tmp_path)
+    session['attached_images'] = ['child-local.png']
+    server._sessions[sid] = session
+    image = tmp_path / 'remote.png'
+    Image.new('RGB', (2, 2), 'red').save(image)
+    routed = []
+    # Admission is the shared real consumer; inspect it without replacing it.
+    admit = server._admit_prompt_turn
+    def capture(*args, **kw):
+        result = admit(*args, **kw)
+        if result:
+            routed.append(result[0])
+        return result
+    monkeypatch.setattr(server, '_admit_prompt_turn', capture)
+    try:
+        for index, paths in enumerate(([str(image)], [])):
+            host.handle_frame({'type':'turn.start','sid':sid,'request_id':f'owned-{index}',
+                               'text':'hello','request_owned_images':True,'attached_images':paths})
+            end = _wait(out, lambda f: f['type']=='turn.end' and f['request_id']==f'owned-{index}')
+            assert end['request_images_adopted'] is True
+            assert session['attached_images'] == ['child-local.png']
+        assert routed == [[str(image)], []]
+    finally:
+        server._sessions.pop(sid, None)
+        host.close()

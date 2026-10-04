@@ -240,7 +240,11 @@ def rpc(op,body):
         with READ_LOCK:
             return TRANSCRIPTS.asset(body['engine'],body['session_id'],body['item_id'],body['asset_path'])
     if op=='sessions':
-        with READ_LOCK: return READERS.sessions(body.get('engine',''),body.get('query',''),int(body.get('limit',50)),body.get('refresh',False))
+        with READ_LOCK:
+            return READERS.sessions(body.get('engine',''),body.get('query',''),body.get('limit',50),
+                                    body.get('refresh',False),offset=body.get('offset',0),
+                                    include_archived=body.get('include_archived',False),
+                                    snapshot_id=body.get('snapshot_id',''))
     if op=='read':
         with READ_LOCK: return READERS.read(body['engine'],body['session_id'],int(body.get('limit',20)))
     if op=='dispatch': return dispatch(body)

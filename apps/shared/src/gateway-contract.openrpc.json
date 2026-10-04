@@ -2834,7 +2834,7 @@
     },
     {
       "name": "session.events.since",
-      "summary": "Replay events after a seq watermark on WS reconnect; truncated means refetch state.",
+      "summary": "Replay events after a seq watermark; truncated or changed replay_generation means refetch state.",
       "params": [
         {
           "name": "params",
@@ -10673,12 +10673,42 @@
       "GatewayCapabilitiesResult": {
         "additionalProperties": false,
         "properties": {
+          "request_owned_prompt_images": {
+            "title": "Request Owned Prompt Images",
+            "type": "boolean"
+          },
+          "prompt_reject_if_busy": {
+            "title": "Prompt Reject If Busy",
+            "type": "boolean"
+          },
+          "prompt_image_uploads": {
+            "title": "Prompt Image Uploads",
+            "type": "boolean"
+          },
+          "prompt_image_max_count": {
+            "title": "Prompt Image Max Count",
+            "type": "integer"
+          },
+          "prompt_image_max_total_bytes": {
+            "title": "Prompt Image Max Total Bytes",
+            "type": "integer"
+          },
+          "prompt_image_max_request_bytes": {
+            "title": "Prompt Image Max Request Bytes",
+            "type": "integer"
+          },
           "per_session_exclusive_submit": {
             "title": "Per Session Exclusive Submit",
             "type": "boolean"
           }
         },
         "required": [
+          "request_owned_prompt_images",
+          "prompt_reject_if_busy",
+          "prompt_image_uploads",
+          "prompt_image_max_count",
+          "prompt_image_max_total_bytes",
+          "prompt_image_max_request_bytes",
           "per_session_exclusive_submit"
         ],
         "title": "GatewayCapabilitiesResult",
@@ -21787,6 +21817,25 @@
         "title": "ProjectsUpdateParams",
         "type": "object"
       },
+      "PromptImageInput": {
+        "additionalProperties": false,
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "content_base64": {
+            "title": "Content Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "content_base64"
+        ],
+        "title": "PromptImageInput",
+        "type": "object"
+      },
       "PromptSubmitParams": {
         "additionalProperties": false,
         "description": "``text`` is normally a string; the relay / hosted paths may hand a structured (parts list)\npayload, and the busy path renders it. Truncation (rewind / edit / regenerate) needs explicit\nconsent: ``confirm_truncate`` plus one durable target (``truncate_before_row_id`` preferred,\n``truncate_before_message_id``, or the legacy ``truncate_before_user_ordinal``).",
@@ -21806,6 +21855,18 @@
             ],
             "default": null,
             "title": "Profile"
+          },
+          "image_inputs": {
+            "items": {
+              "$ref": "#/components/schemas/PromptImageInput"
+            },
+            "title": "Image Inputs",
+            "type": "array"
+          },
+          "reject_if_busy": {
+            "default": false,
+            "title": "Reject If Busy",
+            "type": "boolean"
           },
           "text": {
             "default": "",
@@ -25505,6 +25566,18 @@
           "epoch": {
             "title": "Epoch",
             "type": "string"
+          },
+          "replay_generation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Replay Generation"
           },
           "open_requests": {
             "items": {

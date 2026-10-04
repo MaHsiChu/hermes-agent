@@ -7,8 +7,8 @@ event frames; Ink ignores unknown keys); one lock guards counters + buffers, and
 serializes per-transport writes so stamping cannot reorder frames; memory bound =
 _REPLAY_BUFFER_MAX events AND _REPLAY_BUFFER_BYTES_MAX serialized bytes per session,
 _REPLAY_PROCESS_BYTES_MAX bytes across at most _REPLAY_SESSIONS_MAX sessions, oldest evicted
-FIFO. Evicted or never-retained (oversized) frames leave a truncation watermark so a
-reconnecting client refetches instead of trusting a replay with holes.
+FIFO. Evicted or never-retained (oversized) frames leave a truncation watermark; replacing
+a whole ring changes ``replay_generation`` even if its new seq has already caught up.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ _replay_buffer_bytes: dict[str, int] = {}
 _replay_evicted_through: dict[str, int] = {}
 _replay_total_bytes = 0
 _replay_next_seq: dict[str, int] = {}
+_replay_generations: dict[str, str] = {}
 
 
 def replay_epoch() -> str:
@@ -59,7 +60,7 @@ def _stamp_event(obj: dict) -> None:
         # Session-less global events (skin.changed etc.) are re-fetchable via their own RPCs.
         return
     # Sizing stays OUTSIDE the lock (same rule as transport.write) so one large payload cannot
-    # stall other threads' frames; ``seq`` is not stamped yet, a few bytes off a MiB budget.
+    # stall other threads' frames; stamped metadata is accounted for separately below.
     size = len(json.dumps(params, ensure_ascii=False, separators=(",", ":")).encode(
         "utf-8", errors="surrogatepass"))
     with _replay_lock:
@@ -71,11 +72,17 @@ def _stamp_event(obj: dict) -> None:
         if buf is None:
             buf = _replay_buffers[sid] = deque()
             _replay_buffer_bytes[sid] = 0
+            _replay_generations[sid] = uuid.uuid4().hex
             while len(_replay_buffers) > _REPLAY_SESSIONS_MAX:
                 oldest_sid, oldest_buf = _replay_buffers.popitem(last=False)
                 _replay_total_bytes -= _replay_buffer_bytes.pop(oldest_sid, 0)
                 _replay_next_seq.pop(oldest_sid, None)
                 _replay_evicted_through.pop(oldest_sid, None)
+                _replay_generations.pop(oldest_sid, None)
+        params['replay_generation'] = _replay_generations[sid]
+        # Account for stamped envelope metadata without serializing a large payload under the lock.
+        size += len(json.dumps({'seq': seq, 'replay_generation': params['replay_generation']},
+                               separators=(',', ':'))) - 1
         if size > _REPLAY_BUFFER_BYTES_MAX or size > _REPLAY_PROCESS_BYTES_MAX:
             _replay_evicted_through[sid] = seq
             return
@@ -121,6 +128,17 @@ def latest_seq(sid: str) -> int:
         return _replay_next_seq.get(sid or "", 0)
 
 
+def replay_snapshot(sid: str, last_seen: int) -> dict:
+    """Read events, watermark and ring identity together so eviction cannot mix generations."""
+    sid = sid or ''
+    with _replay_lock:
+        buf = _replay_buffers.get(sid)
+        events = [event for seq, event, _size in buf if seq > last_seen] if buf else []
+        return {'events': events, 'latest_seq': _replay_next_seq.get(sid, 0),
+                'truncated': last_seen < _replay_evicted_through.get(sid, 0), 'count': len(events),
+                'epoch': _REPLAY_EPOCH, 'replay_generation': _replay_generations.get(sid)}
+
+
 def reset_replay_state() -> None:
     """Test hook."""
     with _replay_lock:
@@ -129,6 +147,7 @@ def reset_replay_state() -> None:
         _replay_buffer_bytes.clear()
         _replay_evicted_through.clear()
         _replay_next_seq.clear()
+        _replay_generations.clear()
         _replay_total_bytes = 0
 
 

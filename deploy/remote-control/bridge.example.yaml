@@ -1,0 +1,21 @@
+relay_url: https://remote.example.invalid
+development: false
+device_name: My PC
+credential_file: /absolute/private/remote-device.json
+state_file: /absolute/private/remote-bridge.sqlite3
+poll_seconds: 5
+backends:
+  - backend_id: desktop
+    profile: default
+    engine: hermes
+    url: https://existing-hermes-backend.example.invalid
+    token:
+      file: /absolute/private/existing-hermes-token.txt
+    attachment_roots: []
+  # Explicit additional source, never auto-discovered:
+  # - backend_id: local-hub
+  #   profile: personal
+  #   engine: codex
+  #   url: http://127.0.0.1:your-configured-hub-port
+  #   token: {file: /absolute/private/existing-hub-token}
+  #   attachment_roots: []

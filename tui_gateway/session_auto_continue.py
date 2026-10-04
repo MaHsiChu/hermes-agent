@@ -139,20 +139,21 @@ def _enqueue_prompt(session: dict, text: Any, transport: Any, image_paths: list[
     consecutive-user merge in ``repair_message_sequence``); image-bearing and authored ones stay separate
     envelopes so attachment chronology and the sender survive. ``transport`` is pinned so the drained turn
     streams to its sender."""
+    explicit_images = image_paths is not None
     image_paths = list(image_paths or [])
     # Scrub live-turn self-duplicates first so the text merge below can't glue "{original}\n\n{later}" and re-fire the
     # original after a correction settles.
     # See #84417.
     _drop_queued_duplicates_of_inflight_user(session)
-    text_only = not image_paths and isinstance(text, str)
+    text_only = not explicit_images and isinstance(text, str)
     # A text-only self-copy of the live prompt would restart it on drain; an authored copy is another sender's message.
     if text_only and not turn_author and text.strip() == _ac_inflight_original(session) != "":
         return
-    queued = {"text": text, "transport": transport, **({"image_paths": image_paths} if image_paths else {}),
+    queued = {"text": text, "transport": transport, **({"image_paths": image_paths} if explicit_images else {}),
               **({"turn_author": turn_author} if turn_author else {})}
     existing = session.get("queued_prompt")
     if (existing and text_only and not turn_author and isinstance(existing.get("text"), str)
-            and not existing.get("image_paths") and not existing.get("turn_author")
+            and "image_paths" not in existing and not existing.get("turn_author")
             and not session.get("queued_prompts")):
         prev = existing["text"]
         existing["text"] = f"{prev}\n\n{text}" if prev and text else (prev or text)
@@ -174,7 +175,7 @@ def _sanitize_queued_entry_vs_inflight_user(entry: Any, original: str) -> dict |
     if not isinstance(entry, dict):
         return None
     text = entry.get("text")
-    if not original or entry.get("image_paths") or entry.get("turn_author") or not isinstance(text, str):
+    if not original or "image_paths" in entry or entry.get("turn_author") or not isinstance(text, str):
         return entry
     # A lossless text-merge may have glued the live original onto a later follow-up: keep the remainder.
     rest = next((text[len(original + sep):] for sep in ("\n\n", "\n") if text.startswith(original + sep)), text).strip()
@@ -246,18 +247,19 @@ def _ac_try_correction(rid, session: dict, agent: Any, method: str, plain_text: 
 
 
 def _handle_busy_submit(rid, sid: str, session: dict, text: Any, transport: Any, queued: bool = False,
-                        turn_author: dict | None = None) -> dict | None:
+                        turn_author: dict | None = None, image_paths: list[str] | None = None) -> dict | None:
     """Apply ``display.busy_input_mode`` to a mid-turn prompt instead of rejecting it (rejection made clients busy-retry
     and drop sends): ``interrupt`` (default) → redirect, falling back to hard interrupt + queue; ``queue`` → queue only;
     ``steer`` → inject after the current atomic action. ``queued=True`` (client queue drain) forces queue mode: a "run
     after" message must NEVER become a live correction."""
-    mode = "queue" if queued else _load_busy_input_mode()
+    explicit_images = image_paths is not None
+    mode = "queue" if queued or explicit_images else _load_busy_input_mode()
     agent = session.get("agent")
     with session["history_lock"]:
         if not session.get("running"):
             return None  # turn ended since prompt.submit's busy check; caller retries on the idle session
-        image_paths = list(session.get("attached_images", []))
-        if image_paths:
+        image_paths = list(image_paths if explicit_images else session.get("attached_images", []))
+        if image_paths and not explicit_images:
             session["attached_images"] = []  # claim now so a later paste isn't consumed when the turn yields
     plain_text = _coerce_message_text(text).strip() if not image_paths and _is_text_only_busy_payload(text) else ""
     # Text-only corrections steer/redirect in place when supported; media payloads and older agents fall through to
@@ -274,10 +276,11 @@ def _handle_busy_submit(rid, sid: str, session: dict, text: Any, transport: Any,
     # interrupt can wait behind the op it cancels.
     with session["history_lock"]:
         if not session.get("running"):
-            if image_paths:
+            if image_paths and not explicit_images:
                 session["attached_images"] = image_paths + list(session.get("attached_images", []))
             return None
-        _enqueue_prompt(session, text, transport, image_paths=image_paths, turn_author=turn_author)
+        _enqueue_prompt(session, text, transport,
+                        image_paths=image_paths if explicit_images or image_paths else None, turn_author=turn_author)
         session["last_active"] = time.time()
     # Attachments need their own model invocation: queue without cancelling so the user gets both results in order.
     # ``steer`` must NEVER escalate to a hard interrupt: it would kill the live turn AND drop ``AIAgent._pending_steer``
@@ -318,7 +321,7 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
             session["running"] = False
             return True
     kwargs: dict = {"queued_prompt_generation": queue_generation}
-    if queued.get("image_paths"):
+    if "image_paths" in queued:
         kwargs["image_paths"] = queued["image_paths"]
     # The compute-host frame has no author field, so only the inline runner receives it.
     author_kwargs = {"turn_author": queued["turn_author"]} if queued.get("turn_author") else {}
@@ -336,6 +339,8 @@ def _drain_queued_prompt(rid, sid: str, session: dict) -> bool:
         _notif_log_failure("queued prompt dispatch failed", exc)
         _notif_release_turn(session)
         dispatch_failed = True
+    if not use_compute_host or dispatch_failed:
+        _discard_request_images(session, queued.get("image_paths"))
     if dispatch_failed:
         with session["history_lock"]:
             drain_next = bool(session.get("queued_prompt")) and not session.get("_turn_cancel_requested")

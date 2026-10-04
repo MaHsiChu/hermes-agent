@@ -1,0 +1,12 @@
+# Remote subsystem only; never included by the agent's core runtime.
+Authlib==1.6.9
+SQLAlchemy==2.0.43
+psycopg[binary]==3.2.10
+fastapi==0.135.2
+uvicorn==0.41.0
+httpx==0.28.1
+websockets==15.0.1
+PyYAML==6.0.3
+python-multipart==0.0.22
+Pillow==12.1.1
+portalocker==3.2.0

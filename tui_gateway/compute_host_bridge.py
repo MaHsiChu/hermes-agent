@@ -66,6 +66,7 @@ def _compute_host_turn_frame(
         "reasoning_config_override": session.get("create_reasoning_override"),
         "service_tier_override": session.get("create_service_tier_override"),
         "source": _session_source(session), "attached_images": attached_images,
+        "request_owned_images": image_paths is not None,
         "auth_user_id": _session_auth_user_id(session),
         "queued_prompt_generation": queued_prompt_generation,
         # #101416: vouch that this process already holds the registry lease for this session, so
@@ -268,6 +269,11 @@ def _submit_prompt_to_compute_host(
                     return
                 session.pop("_compute_host_turn_id", None)
                 session.pop("_compute_host_activity_ns", None)
+            if done.get("request_images_adopted") is False:
+                _discard_request_images(session, image_paths)
+            else:
+                # An uncertain worker exit may already have persisted image references.
+                _release_request_image_batches(session, image_paths)
             _on_compute_host_turn_done(rid, sid, session, done)
     try:
         _get_compute_host_supervisor(cfg).submit_turn(frame, on_complete=_complete)

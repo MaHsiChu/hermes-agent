@@ -40,9 +40,11 @@ export interface GatewayEvent<K extends GatewayEventName = GatewayEventName> {
   payload?: GatewayEventMap[K]
   /** Renderer-side source tag added by the Desktop gateway registry. */
   profile?: string
-  /** Per-session monotonic counter stamped by `tui_gateway/event_replay.py::_stamp_event`;
+  /** Counter monotonic within a native replay ring, stamped by `tui_gateway/event_replay.py::_stamp_event`;
    *  absent on session-less broadcasts. */
   seq?: number
+  /** Native replay-ring identity; changes when bounded eviction recreates a session ring. */
+  replay_generation?: string
   session_id?: string
   type: K
 }

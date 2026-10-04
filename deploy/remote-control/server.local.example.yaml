@@ -1,0 +1,12 @@
+public_url: http://127.0.0.1:8787
+host: 127.0.0.1
+port: 8787
+development: true
+database_url: sqlite:///remote-relay.sqlite3
+oidc:
+  issuer: http://127.0.0.1:8788/realms/hermes-remote
+  client_id: hermes-remote
+  # Omit client_secret only for a registered public S256 PKCE client.
+  # client_secret:
+  #   file: /absolute/private/client-secret.txt
+# static_dir: /absolute/hermes-agent/apps/mobile/dist

@@ -641,11 +641,12 @@ class SessionEventsSinceResult(Result):
     truncated: bool
     count: int
     epoch: str
+    replay_generation: str | None = None  # per-ring numbering identity; absent on older backends
     open_requests: list[OpenRequestEntry]
 
 
 method("session.events.since", params=SessionEventsSinceParams, result=SessionEventsSinceResult,
-       doc="Replay events after a seq watermark on WS reconnect; truncated means refetch state.")
+       doc="Replay events after a seq watermark; truncated or changed replay_generation means refetch state.")
 
 
 class SessionEventsStatsParams(ProfileParams):

@@ -42,6 +42,28 @@ def test_stamp_adds_monotonic_seq_per_session():
     assert other["params"]["seq"] == 1
 
 
+def test_generation_identifies_ring_recreation_even_after_sequence_catches_up():
+    original=_frame('original');event_replay._stamp_event(original)
+    generation=original['params'].get('replay_generation')
+    assert isinstance(generation,str) and generation
+    next_frame=_frame('original');event_replay._stamp_event(next_frame)
+    assert next_frame['params']['replay_generation']==generation
+    epoch=event_replay.replay_epoch()
+    for n in range(event_replay._REPLAY_SESSIONS_MAX+1):event_replay._stamp_event(_frame(f'other-{n}'))
+    for _ in range(120):event_replay._stamp_event(_frame('original'))
+    snapshot=event_replay.replay_snapshot('original',0)
+    assert snapshot['epoch']==epoch and snapshot['latest_seq']==120
+    assert snapshot['replay_generation']!=generation
+    assert {e['replay_generation'] for e in snapshot['events']}=={snapshot['replay_generation']}
+    assert snapshot['count']==len(snapshot['events'])==120
+    assert set(event_replay._replay_generations)==set(event_replay._replay_buffers)
+    from tui_gateway import server
+    from tui_gateway.contracts.sessions import SessionEventsSinceResult
+    reply=server._methods['session.events.since']('replay',{'session_id':'original','last_seen':0})['result']
+    parsed=SessionEventsSinceResult.model_validate(reply)
+    assert parsed.replay_generation==snapshot['replay_generation']
+
+
 def test_stamp_ignores_non_event_and_sessionless_frames():
     rpc = {"jsonrpc": "2.0", "id": 1, "result": {}}
     no_sid = {"jsonrpc": "2.0", "method": "event", "params": {"type": "skin.changed"}}

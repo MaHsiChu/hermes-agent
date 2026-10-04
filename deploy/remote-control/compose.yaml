@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?provide private .env}
+      REMOTE_DB_PASSWORD: ${REMOTE_DB_PASSWORD:?provide private .env}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?provide private .env}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+      - ./init-postgres.sh:/docker-entrypoint-initdb.d/10-remote.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    command: [start, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?provide private .env}
+      KC_HOSTNAME: https://identity.example.invalid
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: 'true'
+      KC_BOOTSTRAP_ADMIN_USERNAME: remote-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?provide private .env}
+      REMOTE_OIDC_CLIENT_SECRET: ${REMOTE_OIDC_CLIENT_SECRET:?provide private .env}
+    volumes:
+      - ./realm.example.json:/opt/keycloak/data/import/hermes-remote-realm.json:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+  relay:
+    build:
+      context: ../..
+      dockerfile: deploy/remote-control/Dockerfile
+    environment:
+      REMOTE_DATABASE_URL: postgresql+psycopg://remote:${REMOTE_DB_PASSWORD:?provide private .env}@postgres:5432/remote
+      REMOTE_OIDC_CLIENT_SECRET: ${REMOTE_OIDC_CLIENT_SECRET:?provide private .env}
+    volumes:
+      - ./server.example.yaml:/config/server.yaml:ro
+      - ../../apps/mobile/dist:/app/mobile:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: unless-stopped
+  caddy:
+    image: caddy:2.10.2-alpine
+    ports: ["80:80", "443:443", "443:443/udp"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [relay, keycloak]
+    restart: unless-stopped
+volumes:
+  postgres:
+  caddy_data:
+  caddy_config:

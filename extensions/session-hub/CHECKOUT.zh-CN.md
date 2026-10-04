@@ -62,6 +62,18 @@ Python 测试复用原有隔离数据用例，未配置的首次 checkout 需要
 
 ## 平台与交接边界
 
+### 全目录读取（远程适配器）
+
+`sessions` RPC 和 `hub_sessions` 接受 `offset`、`include_archived`、`snapshot_id`。
+第一页从 `offset=0` 开始；后续保持相同 `engine`、`query`、`include_archived`，
+使用返回的 `pagination.snapshot_id` 和 `pagination.next_offset`，直到后者为 null。
+每页上限仍为 200，但不再把 200 条当作完整目录。Codex 的归档记录可显式纳入。
+Claude 的归档标记仅来自本机 Desktop 元数据；未下载的云端内容不在范围内。
+
+目录快照在后台刷新期间保持稳定，最长保留 180 秒，最多保留 32 份。
+失效会明确报错，读取方应重新扫描；只有 `pagination.complete=true` 且全部页读取成功，
+才能用此次目录对账删除记录。`errors` 或中断不等于源会话已删除。
+
 这是现有 Windows Session Hub 的源码交接，同时修正了仓库迁入后的构建目录和显式安装路径。Mac 的 Claude 进程发现、App URI 激活、CLI 参数以及 Codex App Tools 版本仍需真机适配验证；不宣称本次发布已完成 Mac 端 App 控制。
 
 Windows 当前仍运行原外层 `HermesAgent/extensions/session-hub` 副本。本次只纳入源码，不自动重新绑定现有会话或切换在线服务。后续维护以仓库内版本为准；切换前停止旧实例，并保留其数据和配置供明确迁移，不能同时运行两个写同一数据目录的实例。

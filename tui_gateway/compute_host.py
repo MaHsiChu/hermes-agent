@@ -216,6 +216,7 @@ class ComputeHost:
         if not sid:
             self._reply("turn.error", sid, request_id, message="sid required")
             return
+        images_adopted = False
         try:
             from tui_gateway import server
             session = self._ensure_server_session(server, frame)
@@ -231,10 +232,11 @@ class ComputeHost:
                 queued_gen = frame.get("queued_prompt_generation")
                 current_gen = int(session.get("_queued_prompt_generation", 0))
                 if queued_gen is not None and current_gen != int(queued_gen):
-                    self._reply("turn.end", sid, request_id, interrupted=True, ended_ns=now_ns())
+                    self._reply("turn.end", sid, request_id, interrupted=True, ended_ns=now_ns(),
+                                request_images_adopted=False)
                     return
                 if session.get("running"):
-                    self._reply("turn.error", sid, request_id, message="session busy")
+                    self._reply("turn.error", sid, request_id, message="session busy", request_images_adopted=False)
                     return
                 session.update(running=True, _turn_cancel_requested=False, last_active=time.time())
                 server._start_inflight_turn(session, inflight)
@@ -247,8 +249,11 @@ class ComputeHost:
                 hermes_undo.on_user_message_appended(session["session_key"])
             with contextlib.suppress(Exception):
                 server._persist_branch_seed(session)
-            server._run_prompt_submit(
-                request_id, sid, session, text, display_kind=frame.get("display_kind") or None)
+            images_adopted = None  # a raising dispatch may already have durable refs
+            images_adopted = server._run_prompt_submit(
+                request_id, sid, session, text, display_kind=frame.get("display_kind") or None,
+                **({"image_paths": list(frame.get("attached_images") or [])}
+                   if frame.get("request_owned_images") is True else {}))
             run_thread = session.get("_run_thread")
             if run_thread is not None and hasattr(run_thread, "join"):
                 while run_thread.is_alive():
@@ -263,7 +268,7 @@ class ComputeHost:
                 self._progress_counter += 1
             self._reply(
                 "turn.end", sid, request_id, **meta, interrupted=interrupted, ended_ns=now_ns(),
-                session_info=session_info, session_info_emitted=True)
+                session_info=session_info, session_info_emitted=True, request_images_adopted=images_adopted)
         except Exception as exc:
             with contextlib.suppress(Exception):
                 from tui_gateway import server
@@ -272,7 +277,8 @@ class ComputeHost:
                     with session.get("history_lock", threading.Lock()):
                         session["running"] = False
                         server._clear_inflight_turn(session)
-            self._reply("turn.error", sid, request_id, reason="exception", message=str(exc))
+            self._reply("turn.error", sid, request_id, reason="exception", message=str(exc),
+                        request_images_adopted=images_adopted)
 
     def _emit_turn_activity(self, sid: str, session: dict, turn_id: str, started_at: float) -> None:
         # Observe the agent clock, never the host heartbeat. A reused agent's last
@@ -303,7 +309,7 @@ class ComputeHost:
                     session[key] = str(frame[key])
         else:
             session = self._build_server_session(server, frame, sid)
-        if isinstance(frame.get("attached_images"), list):
+        if frame.get("request_owned_images") is not True and isinstance(frame.get("attached_images"), list):
             session["attached_images"] = list(frame.get("attached_images") or [])
         return session
 

@@ -463,6 +463,13 @@ def _teardown_session(session: dict | None, *, end_reason: str = "tui_close") ->
     slash-worker is closed in ``_finalize_session`` (the single chokepoint), NOT here. Idempotent via ``_finalized``."""
     if not session:
         return
+    with _history_lock(session):
+        discarded = [session.get("queued_prompt"), *(session.get("queued_prompts") or [])]
+        session["queued_prompt"] = None
+        session.pop("queued_prompts", None)
+    for entry in discarded:
+        if entry:
+            _discard_request_images(session, entry.get("image_paths"))
     _finalize_session(session, end_reason=end_reason)
     _announce_session_reclaimed(session, end_reason)
     with contextlib.suppress(Exception):
@@ -602,9 +609,13 @@ def _interrupt_session_turn(sid: str, session: dict, *, request_id: str | None =
         run_thread_alive = (rt := session.get("_run_thread")) is not None and rt.is_alive()
     with session["history_lock"]:
         session["_turn_cancel_requested"] = True
+        discarded = [session.get("queued_prompt"), *(session.get("queued_prompts") or [])]
         session["queued_prompt"] = None
         session.pop("queued_prompts", None)
         session["_queued_prompt_generation"] = int(session.get("_queued_prompt_generation", 0)) + 1
+    for entry in discarded:
+        if entry:
+            _discard_request_images(session, entry.get("image_paths"))
     if should_interrupt:
         # Sibling of gateway/run_agent_cache.py::_interrupt_and_clear_session: a user-initiated stop of a
         # live TUI/desktop turn is the same "loop is gone" event for plugins holding per-turn external

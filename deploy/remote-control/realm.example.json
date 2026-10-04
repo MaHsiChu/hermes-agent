@@ -1,0 +1,20 @@
+{
+  "realm": "hermes-remote",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "clients": [{
+    "clientId": "hermes-remote",
+    "enabled": true,
+    "publicClient": false,
+    "secret": "${REMOTE_OIDC_CLIENT_SECRET}",
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "serviceAccountsEnabled": false,
+    "redirectUris": ["https://remote.example.invalid/auth/callback"],
+    "webOrigins": ["https://remote.example.invalid"],
+    "attributes": {"pkce.code.challenge.method": "S256"}
+  }]
+}

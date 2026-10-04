@@ -122,6 +122,7 @@ def _admit_prompt_turn(
             session["running"] = False
             session.pop("_submit_user_row", None)  # no turn runs: the submit-time row stays as the send
         _emit("error", sid, {"message": str(ownership_refusal)})
+        _discard_request_images(session, image_paths)
         return None
     with session["history_lock"]:
         if session.get("_closing") or (
@@ -129,6 +130,7 @@ def _admit_prompt_turn(
             and int(session.get("_queued_prompt_generation", 0)) != queued_prompt_generation):
             session["running"] = False
             session.pop("_submit_user_row", None)
+            # The caller/queue owns cleanup when this pre-admission gate refuses.
             return None
         images = list(session.get("attached_images", []) if image_paths is None else image_paths)
         if image_paths is None:
@@ -156,6 +158,7 @@ def _admit_prompt_turn(
         _emit_terminal_turn_error(
             sid, session, reason,
             error_surface={"layer": "runtime", "code": "agent_init_failed", "retryable": True})
+        _discard_request_images(session, image_paths)
         return None
     return images, agent
 
@@ -995,7 +998,10 @@ def _run_prompt_submit(
             if registered is session:
                 _reopen_routed_session_row(routing_db, sid, session)
             can_start = _start_session_work(run, name=f"prompt-turn-{sid}", session=session) is not None
-    if not can_start:
+    if can_start:
+        # Final startup may still refuse after admission; only a started worker owns durable assets.
+        _release_request_image_batches(session, image_paths)
+    else:
         with session["history_lock"]:
             session["running"] = False
     return can_start

@@ -1376,6 +1376,12 @@ export interface PingResult {
   pong: boolean
 }
 export interface GatewayCapabilitiesResult {
+  request_owned_prompt_images: boolean
+  prompt_reject_if_busy: boolean
+  prompt_image_uploads: boolean
+  prompt_image_max_count: number
+  prompt_image_max_total_bytes: number
+  prompt_image_max_request_bytes: number
   per_session_exclusive_submit: boolean
 }
 export interface ClientCapabilitiesParams {
@@ -2125,6 +2131,8 @@ export interface PetScaleResult {
 export interface PromptSubmitParams {
   session_id: string
   profile?: string | null
+  image_inputs?: PromptImageInput[]
+  reject_if_busy?: boolean
   text?: unknown
   display_kind?: string | null
   interrupted?: boolean | null
@@ -2137,6 +2145,10 @@ export interface PromptSubmitParams {
   confirm_truncate?: boolean | null
   confirm_empty_truncate?: boolean | null
   rebind_survivor_row_ids?: number[] | null
+}
+export interface PromptImageInput {
+  filename: string
+  content_base64: string
 }
 /** ``status`` is absent only on the typed-stop-phrase reply (``voice_stopped``). After a truncation the survivor row ids let the client rebind its cached ``rowId``s (``None`` map entries: drop the cached id). ``turn_isolation`` marks a compute-host dispatch. */
 export interface PromptSubmitResult {
@@ -2952,6 +2964,7 @@ export interface SessionEventsSinceResult {
   truncated: boolean
   count: number
   epoch: string
+  replay_generation?: string | null
   open_requests: OpenRequestEntry[]
 }
 export interface SessionEventsStatsParams {
@@ -4496,7 +4509,7 @@ export interface RpcMethods {
   'session.cwd.set': { params: SessionCwdSetParams; result: SessionCwdSetResult }
   /** Delete a stored session + transcripts; refused while it is live here. */
   'session.delete': { params: SessionDeleteParams; result: SessionDeleteResult }
-  /** Replay events after a seq watermark on WS reconnect; truncated means refetch state. */
+  /** Replay events after a seq watermark; truncated or changed replay_generation means refetch state. */
   'session.events.since': { params: SessionEventsSinceParams; result: SessionEventsSinceResult }
   /** Replay-buffer occupancy telemetry (ops/debug). */
   'session.events.stats': { params: SessionEventsStatsParams; result: SessionEventsStatsResult }

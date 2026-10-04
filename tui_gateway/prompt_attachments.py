@@ -61,6 +61,116 @@ def _decode_attach_payload(
     return data, None
 
 
+# Below the native desktop WS frame cap (384 MiB), including five base64 images.
+_PROMPT_IMAGE_MAX_COUNT = 5
+_PROMPT_IMAGE_MAX_TOTAL_BYTES = 25 * 1024 * 1024
+_PROMPT_IMAGE_MAX_REQUEST_BYTES = 36 * 1024 * 1024
+_REQUEST_OWNED_PROMPT_IMAGES = True
+_PROMPT_REJECT_IF_BUSY = True
+
+
+def _prompt_image_capabilities() -> dict:
+    try:
+        from PIL import Image
+        available = True
+    except ImportError:
+        available = False
+    return {
+        "request_owned_prompt_images": _REQUEST_OWNED_PROMPT_IMAGES,
+        "prompt_reject_if_busy": _PROMPT_REJECT_IF_BUSY,
+        "prompt_image_uploads": available,
+        "prompt_image_max_count": _PROMPT_IMAGE_MAX_COUNT,
+        "prompt_image_max_total_bytes": _PROMPT_IMAGE_MAX_TOTAL_BYTES,
+        "prompt_image_max_request_bytes": _PROMPT_IMAGE_MAX_REQUEST_BYTES,
+    }
+
+
+def _release_request_image_batches(session: dict, image_paths) -> set[str]:
+    """Transfer internally registered batches out of transient request ownership."""
+    parents = {str(Path(p).parent) for p in image_paths or []}
+    if not parents:
+        return set()
+    with session["history_lock"]:
+        batches = session.get("_prompt_image_batches", set())
+        owned = parents.intersection(batches)
+        batches.difference_update(owned)
+        if not batches:
+            session.pop("_prompt_image_batches", None)
+    return owned
+
+
+def _discard_request_images(session: dict, image_paths) -> None:
+    """Delete only registered unadopted batches, never arbitrary legacy attachment paths."""
+    import shutil
+    for directory in _release_request_image_batches(session, image_paths):
+        shutil.rmtree(directory)
+
+
+def _prepare_prompt_images(rid, session: dict, params: dict):
+    """Validate the entire request before prompt effects. Files never enter shared staging."""
+    import json
+    import tempfile
+    images = params["image_inputs"]
+    if not isinstance(images, list) or len(images) > _PROMPT_IMAGE_MAX_COUNT:
+        return None, _err(rid, 4017, f"image_inputs must be a list of at most {_PROMPT_IMAGE_MAX_COUNT} images")
+    # Budget the serialized params before allocating decoded payloads. RPC envelope has ample headroom.
+    if len(json.dumps(params, ensure_ascii=True).encode("utf-8")) > _PROMPT_IMAGE_MAX_REQUEST_BYTES:
+        return None, _err(rid, 4018, "prompt request too large; maximum is 36 MiB including encoded images")
+    if not images:
+        return [], None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None, _err(rid, 4016, "image uploads require the backend Pillow dependency")
+    from tools.vision_tools_image_prep import _validate_raster_image_decodable
+    decoded = []
+    total = 0
+    for item in images:
+        if (not isinstance(item, dict) or set(item) != {"filename", "content_base64"}
+                or not isinstance(item["filename"], str) or not isinstance(item["content_base64"], str)):
+            return None, _err(rid, 4017, "each image requires only filename and content_base64 strings")
+        data, error = _decode_attach_payload(
+            rid, item["content_base64"], mime_prefix="image/", max_bytes=_ATTACH_BYTES_MAX_BYTES,
+            label="image", empty_msg="image is empty")
+        if error:
+            return None, error
+        total += len(data)
+        if total > _PROMPT_IMAGE_MAX_TOTAL_BYTES:
+            return None, _err(rid, 4018, "images exceed the 25 MiB total decoded byte limit")
+        decoded.append(data)
+    root = _session_images_dir(session)
+    owner = _session_home_dir(session, "").resolve()
+    if not root.resolve().is_relative_to(owner):
+        return None, _err(rid, 4016, "image storage escapes the owning profile")
+    paths = []
+    directory = None
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+        directory = Path(tempfile.mkdtemp(prefix="prompt-request-", dir=root))
+        for index, data in enumerate(decoded):
+            path = directory / f"{index}.image"
+            path.write_bytes(data)
+            paths.append(str(path))
+            error = _validate_raster_image_decodable(path)
+            if error:
+                raise ValueError(error)
+            with Image.open(path) as image:
+                ext = {"PNG": ".png", "JPEG": ".jpg", "GIF": ".gif", "WEBP": ".webp", "BMP": ".bmp"}.get(image.format)
+            if ext is None:
+                raise ValueError("unsupported raster image format")
+            target = path.with_suffix(ext)
+            path.rename(target)
+            paths[-1] = str(target)
+        with session["history_lock"]:
+            session.setdefault("_prompt_image_batches", set()).add(str(directory))
+        return paths, None
+    except (OSError, ValueError) as exc:
+        if directory is not None:
+            import shutil
+            shutil.rmtree(directory)
+        return None, _err(rid, 4017, f"image upload rejected: {exc}")
+
+
 def _sniff_image_ext(img_bytes: bytes, filename: str = "") -> str:
     """Extension from the filename hint, else magic bytes (WebP: RIFF container), else ``.png``."""
     if filename and (suffix := Path(filename).suffix.lower()):
